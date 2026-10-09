@@ -2,7 +2,7 @@
   "name": "cwv-monitor",
   "version": "1.0.0",
   "private": true,
-  "description": "Monitor sintético de Core Web Vitals (LCP, CLS, INP) con Playwright + Lighthouse y alertas por webhook",
+  "description": "Monitor de Core Web Vitals desde Search Console con alertas por email",
   "type": "module",
   "engines": {
     "node": ">=22.19"
@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node src/index.js",
     "start:local": "node --env-file=.env src/index.js",
+    "auth": "node src/auth.js",
     "test": "node --test"
   },
   "dependencies": {

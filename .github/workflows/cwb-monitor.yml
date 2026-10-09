@@ -1,22 +1,22 @@
-name: Core Web Vitals Monitor
+name: Search Console Core Web Vitals Email Monitor
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    # Change this cron expression to adjust polling cadence (GitHub Actions minimum is 5 minutes).
+    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Never run two audits at once: they would compete for CPU and skew the measurements.
 concurrency:
-  group: cwv-monitor
+  group: gsc-cwv-monitor
   cancel-in-progress: false
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 9
     steps:
       - uses: actions/checkout@v7
 
@@ -28,17 +28,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Cache Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Audit Core Web Vitals
+      - name: Read Search Console and send email on issues
         run: npm start
         env:
-          URLS_TO_CHECK: ${{ secrets.URLS_TO_CHECK }}
-          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-          # Prefer repository Variables for thresholds: short numeric secrets like "0.1" get masked
-          # as *** everywhere in the logs. Secrets are still accepted; empty means default.
-          MAX_LCP: ${{ vars.MAX_LCP || secrets.MAX_LCP }}
-          MAX_CLS: ${{ vars.MAX_CLS || secrets.MAX_CLS }}
-          MAX_INP: ${{ vars.MAX_INP || secrets.MAX_INP }}
-          RUNS_PER_URL: ${{ vars.RUNS_PER_URL || secrets.RUNS_PER_URL }}
+          GSC_PROPERTIES: ${{ secrets.GSC_PROPERTIES }}
+          GSC_STORAGE_STATE_BASE64: ${{ secrets.GSC_STORAGE_STATE_BASE64 }}
+          GSC_DEVICES: ${{ vars.GSC_DEVICES || 'MOBILE,DESKTOP' }}
+          EMAIL_API_KEY: ${{ secrets.EMAIL_API_KEY }}
+          EMAIL_API_URL: ${{ vars.EMAIL_API_URL || 'https://api.resend.com/emails' }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          MAX_LCP: ${{ vars.MAX_LCP || '2500' }}
+          MAX_CLS: ${{ vars.MAX_CLS || '0.1' }}
+          MAX_INP: ${{ vars.MAX_INP || '200' }}

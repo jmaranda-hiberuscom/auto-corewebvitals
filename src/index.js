@@ -1,91 +1,73 @@
-import { createServer } from 'node:net';
+import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
-import { buildText, sendAlert } from './alert.js';
-import { describeMetrics, evaluateBudget } from './budget.js';
 import { ConfigError, loadConfig } from './config.js';
-import { PROFILE_LABEL } from './emulation.js';
-import { measureInp } from './inp.js';
-import { runLighthouse } from './lighthouse.js';
-import { median } from './stats.js';
+import { sendEmail } from './email.js';
+import { scrapeGscDeviceReport } from './gsc.js';
 
 const EXIT_OK = 0;
-const EXIT_BUDGET_EXCEEDED = 1;
 const EXIT_ERROR = 2;
 
-function getFreePort() {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const { port } = server.address();
-      server.close(() => resolve(port));
-    });
-  });
-}
-
-async function auditUrl(browser, port, url, runs) {
-  const samples = [];
-  let lastError = null;
-  for (let run = 1; run <= runs; run++) {
-    try {
-      const { lcp, cls } = await runLighthouse(url, port);
-      const inp = await measureInp(browser, url);
-      samples.push({ lcp, cls, inp });
-      console.log(`  [${run}/${runs}] ${describeMetrics({ lcp, cls, inp })}`);
-    } catch (err) {
-      lastError = err.message;
-      console.error(`  [${run}/${runs}] error: ${err.message}`);
-    }
+async function loadStorageState(config) {
+  try {
+    const serialized = config.storageStateBase64
+      ? Buffer.from(config.storageStateBase64, 'base64').toString('utf8')
+      : await readFile(config.storageStatePath, 'utf8');
+    return JSON.parse(serialized);
+  } catch {
+    throw new ConfigError('No se pudo cargar la sesión de Search Console. Ejecuta npm run auth localmente y configura el estado en GitHub Secrets.');
   }
-  if (samples.length === 0) return { error: lastError, metrics: null };
-  return {
-    error: null,
-    metrics: {
-      lcp: median(samples.map((s) => s.lcp)),
-      cls: median(samples.map((s) => s.cls)),
-      inp: median(samples.map((s) => s.inp)),
-    },
-  };
 }
 
 async function main() {
   const config = loadConfig();
-  const timestamp = new Date().toISOString();
-  const port = await getFreePort();
-  const browser = await chromium.launch({ channel: 'chromium', args: [`--remote-debugging-port=${port}`] });
-
-  const failures = [];
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ storageState: await loadStorageState(config) });
+  const alerts = [];
   try {
-    for (const url of config.urls) {
-      console.log(url);
-      const { error, metrics } = await auditUrl(browser, port, url, config.runsPerUrl);
-      const violations = metrics ? evaluateBudget(metrics, config.thresholds) : [];
-      const failed = Boolean(error) || violations.length > 0;
-      console.log(`  -> ${failed ? 'FALLIDO' : 'OK'}${metrics ? ` (mediana: ${describeMetrics(metrics)})` : ''}`);
-      if (failed) failures.push({ url, error, metrics, violations });
+    for (const property of config.properties) {
+      for (const device of config.devices) {
+        console.log(`${property} · ${device}`);
+        const report = await scrapeGscDeviceReport(context, property, device);
+        if (!report.available) {
+          console.log('  -> Sin datos suficientes en Search Console.');
+          continue;
+        }
+
+        if (report.issues.length === 0) {
+          console.log('  -> Sin issues sobre los umbrales estándar.');
+          continue;
+        }
+
+        for (const issue of report.issues) {
+          alerts.push({
+            property,
+            device,
+            ...issue,
+            limit: config.thresholds[issue.key],
+            unit: issue.key === 'cls' ? '' : ' ms',
+          });
+          console.log(`  -> ${issue.metric}: ${issue.status} (${issue.issueText})`);
+        }
+      }
     }
   } finally {
+    await context.close();
     await browser.close();
   }
 
-  if (failures.length === 0) return EXIT_OK;
+  if (alerts.length === 0) return EXIT_OK;
 
   const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID } = process.env;
   const report = {
-    timestamp,
-    profile: PROFILE_LABEL,
+    timestamp: new Date().toISOString(),
     thresholds: config.thresholds,
     runUrl: GITHUB_RUN_ID ? `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}` : null,
-    failures,
+    alerts,
   };
 
-  if (config.webhookUrl) {
-    await sendAlert(config.webhookUrl, report);
-    console.log(`Alerta enviada: ${failures.length} URL(s) fuera de presupuesto.`);
-  } else {
-    console.warn(`WEBHOOK_URL no configurado; la alerta no se ha enviado:\n${buildText(report)}`);
-  }
-  return EXIT_BUDGET_EXCEEDED;
+  await sendEmail(config, report);
+  console.log(`Email enviado: ${alerts.length} issue(s) sobre el umbral.`);
+  return EXIT_OK;
 }
 
 main().then(
