@@ -54,6 +54,17 @@ test('demo is clearly identified without invented metrics', () => {
   assert.doesNotMatch(markdown, /\| p75 \|/);
 });
 
+test('manual demo can mention the triggering account without promising email delivery', () => {
+  const markdown = buildReport({ demo: true, timestamp: report.timestamp, notifyUser: 'jmaranda-hiberuscom' });
+  assert.match(markdown, /^@jmaranda-hiberuscom: prueba dirigida a tu cuenta\./m);
+  assert.match(markdown, /email solo si tienes habilitadas las notificaciones/);
+  assert.throws(() => buildReport({ demo: true, notifyUser: 'user @another-user' }), /usuario de GitHub valido/);
+});
+
+test('regular reports do not mention users even if a demo recipient was supplied', () => {
+  assert.doesNotMatch(buildReport({ ...report, notifyUser: 'jmaranda-hiberuscom' }), /@jmaranda-hiberuscom/);
+});
+
 test('saves Markdown and JSON and appends the same report to the Actions summary', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'cwv-report-'));
   try {

@@ -75,15 +75,18 @@ test('manual demo publishes once and never calls CrUX', async () => {
   let deliveries = 0;
   const report = await runMonitor(config, {
     demo: true,
+    notifyUser: 'jmaranda-hiberuscom',
     queryRecord: async () => assert.fail('CrUX must not run in demo mode'),
     publish: async (settings, payload) => {
       assert.equal(payload.demo, true);
+      assert.equal(payload.notifyUser, 'jmaranda-hiberuscom');
       deliveries++;
     },
     log: () => {},
   });
   assert.equal(deliveries, 1);
   assert.equal(report.demo, true);
+  assert.equal(report.notifyUser, 'jmaranda-hiberuscom');
 });
 
 test('API and publishing failures propagate so GitHub Actions marks the run failed', async () => {
@@ -152,7 +155,7 @@ test('CLI demo generates local output without credentials or network requests', 
   try {
     const result = spawnSync(process.execPath, [fileURLToPath(new URL('../src/index.js', import.meta.url)), '--demo'], {
       cwd: directory,
-      env: {},
+      env: { GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_ACTOR: 'jmaranda-hiberuscom' },
       encoding: 'utf8',
     });
     assert.equal(result.error, undefined);
@@ -160,7 +163,9 @@ test('CLI demo generates local output without credentials or network requests', 
     const markdown = await readFile(join(directory, 'reports/core-web-vitals.md'), 'utf8');
     const report = JSON.parse(await readFile(join(directory, 'reports/core-web-vitals.json'), 'utf8'));
     assert.match(markdown, /No se ha consultado CrUX/);
+    assert.match(markdown, /^@jmaranda-hiberuscom: /m);
     assert.equal(report.demo, true);
+    assert.equal(report.notifyUser, 'jmaranda-hiberuscom');
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

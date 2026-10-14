@@ -20,7 +20,7 @@ Por tanto, el tecnico necesita una cuenta de GitHub, acceso al repositorio y una
 ## 2. Probar publicacion y notificaciones sin claves
 
 1. Abre **Actions > CrUX Core Web Vitals Daily Report > Run workflow**. Selecciona la rama con los cambios y el modo **demo**.
-2. La ejecucion creara o reutilizara una issue titulada **Informe diario de Core Web Vitals** y publicara una prueba marcada claramente, sin consultar CrUX ni inventar medidas. El registro muestra el enlace al comentario.
+2. La ejecucion creara o reutilizara una issue titulada **Informe diario de Core Web Vitals** y publicara una prueba marcada claramente, sin consultar CrUX ni inventar medidas. La prueba manual menciona al usuario que la lanza para generar una notificacion dirigida a su cuenta; el registro muestra el enlace al comentario. El email depende de sus preferencias de notificaciones, no de la respuesta de publicacion.
 3. Comparte el enlace de la issue con el tecnico. El tecnico pulsa **Subscribe** en la issue.
 4. En su cuenta, el tecnico anade y verifica su correo corporativo en **Settings > Emails**. En [Settings > Notifications](https://github.com/settings/notifications), activa **Email** para conversaciones en las que participa o que sigue, habilita notificaciones de comentarios y selecciona esa direccion como correo de notificaciones. No cambies el correo de otra persona desde tu cuenta.
 5. Ejecuta **demo** otra vez, despues de la suscripcion, para crear un comentario nuevo. Comprueba la notificacion de GitHub y la llegada al buzon corporativo, incluido spam. La primera prueba anterior a la suscripcion no demuestra la entrega.

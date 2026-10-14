@@ -20,6 +20,12 @@ export function buildReport(report) {
 
   if (report.demo) {
     lines.push('Esta es una prueba de publicacion y notificaciones de GitHub. No se ha consultado CrUX.', '');
+    if (report.notifyUser) {
+      if (!/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/i.test(report.notifyUser)) {
+        throw new Error('El destinatario de la mencion debe ser un usuario de GitHub valido.');
+      }
+      lines.push(`@${report.notifyUser}: prueba dirigida a tu cuenta. GitHub enviara email solo si tienes habilitadas las notificaciones por correo para menciones y conversaciones en las que participas.`, '');
+    }
   } else {
     const measurements = report.measurements ?? [];
     const alertCount = measurements.filter(({ p75, limit }) => p75 > limit).length;

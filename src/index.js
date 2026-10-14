@@ -38,9 +38,10 @@ export async function runMonitor(config, {
   timestamp = new Date().toISOString(),
   runUrl = null,
   demo = false,
+  notifyUser = null,
 } = {}) {
   if (demo) {
-    const report = { demo: true, timestamp, runUrl };
+    const report = { demo: true, timestamp, runUrl, ...(notifyUser ? { notifyUser } : {}) };
     await publish(config, report);
     log('Prueba de publicacion terminada; no se ha consultado CrUX.');
     return report;
@@ -95,11 +96,12 @@ async function main() {
   }
   const demo = args.includes('--demo');
   const config = loadConfig(process.env, { demo });
-  const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID } = process.env;
+  const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID, GITHUB_EVENT_NAME, GITHUB_ACTOR } = process.env;
   const runUrl = GITHUB_SERVER_URL && GITHUB_REPOSITORY && GITHUB_RUN_ID
     ? `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`
     : null;
-  await runMonitor(config, { demo, runUrl });
+  const notifyUser = demo && GITHUB_EVENT_NAME === 'workflow_dispatch' ? GITHUB_ACTOR : null;
+  await runMonitor(config, { demo, runUrl, notifyUser });
   return EXIT_OK;
 }
 
