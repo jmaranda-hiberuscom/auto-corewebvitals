@@ -1,5 +1,3 @@
-import { validateGscThresholds } from './gsc.js';
-
 export class ConfigError extends Error {}
 
 function readNumber(env, name, fallback, { integer = false, min = 0 } = {}) {
@@ -13,12 +11,18 @@ function readNumber(env, name, fallback, { integer = false, min = 0 } = {}) {
   return value;
 }
 
-function isHttpUrl(value) {
+function normalizeOrigin(value) {
   try {
-    const { protocol } = new URL(value);
-    return protocol === 'http:' || protocol === 'https:';
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol)
+      || url.username
+      || url.password
+      || url.pathname !== '/'
+      || url.search
+      || url.hash) return null;
+    return url.origin;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -26,47 +30,37 @@ function parseList(value) {
   return [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))];
 }
 
-function validProperty(property) {
-  if (property.startsWith('sc-domain:')) return /^[a-z0-9.-]+$/i.test(property.slice('sc-domain:'.length));
-  return isHttpUrl(property);
-}
-
-export function loadConfig(env = process.env) {
-  const properties = parseList(env.GSC_PROPERTIES ?? '');
-  if (properties.length === 0) {
-    throw new ConfigError('GSC_PROPERTIES es obligatorio (propiedades de Search Console separadas por comas).');
+export function loadConfig(env = process.env, { demo = false } = {}) {
+  const originValues = parseList(env.CRUX_ORIGINS ?? '');
+  if (!demo && originValues.length === 0) {
+    throw new ConfigError('CRUX_ORIGINS es obligatorio (orígenes de CrUX separados por comas).');
   }
-  properties.forEach((property, i) => {
-    if (!validProperty(property)) throw new ConfigError(`GSC_PROPERTIES: la entrada #${i + 1} no es una propiedad válida.`);
+  const origins = originValues.map((origin, i) => {
+    const normalized = normalizeOrigin(origin);
+    if (!normalized) throw new ConfigError(`CRUX_ORIGINS: la entrada #${i + 1} no es un origen http(s) válido.`);
+    return normalized;
   });
 
-  const devices = parseList(env.GSC_DEVICES?.trim() || 'MOBILE,DESKTOP').map((device) => device.toUpperCase());
+  const apiKey = env.CRUX_API_KEY?.trim();
+  if (!demo && !apiKey) throw new ConfigError('CRUX_API_KEY es obligatorio.');
+
+  const devices = parseList(env.CRUX_DEVICES?.trim() || 'MOBILE,DESKTOP').map((device) => device.toUpperCase());
   if (devices.length === 0 || devices.some((device) => !['MOBILE', 'DESKTOP'].includes(device))) {
-    throw new ConfigError('GSC_DEVICES solo admite MOBILE y/o DESKTOP.');
+    throw new ConfigError('CRUX_DEVICES solo admite MOBILE y/o DESKTOP.');
   }
 
-  const storageStateBase64 = env.GSC_STORAGE_STATE_BASE64?.trim() || null;
-  const storageStatePath = env.GSC_STORAGE_STATE_PATH?.trim() || '.auth/gsc-storage-state.json';
-  if (!storageStateBase64 && !storageStatePath) throw new ConfigError('Configura GSC_STORAGE_STATE_BASE64 o GSC_STORAGE_STATE_PATH.');
-  if (storageStateBase64) {
-    try {
-      const state = JSON.parse(Buffer.from(storageStateBase64, 'base64').toString('utf8'));
-      if (!Array.isArray(state.cookies) || !Array.isArray(state.origins)) throw new Error('invalid state');
-    } catch {
-      throw new ConfigError('GSC_STORAGE_STATE_BASE64 no contiene un estado Playwright válido.');
+  const repository = env.GITHUB_REPOSITORY?.trim();
+  const token = env.GITHUB_TOKEN?.trim();
+  let github = null;
+  if (repository || token) {
+    if (!token || !/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i.test(repository ?? '')) {
+      throw new ConfigError('La publicacion requiere GITHUB_REPOSITORY (owner/repo) y GITHUB_TOKEN.');
     }
-  }
-
-  const emailApiKey = env.EMAIL_API_KEY?.trim();
-  const emailApiUrl = env.EMAIL_API_URL?.trim() || 'https://api.resend.com/emails';
-  const emailFrom = env.EMAIL_FROM?.trim();
-  const emailTo = parseList(env.EMAIL_TO ?? '');
-  if (!emailApiKey || !emailFrom || emailTo.length === 0) {
-    throw new ConfigError('EMAIL_API_KEY, EMAIL_FROM y EMAIL_TO son obligatorios para enviar alertas por correo.');
-  }
-  if (!isHttpUrl(emailApiUrl)) throw new ConfigError('EMAIL_API_URL debe ser una URL http(s) válida.');
-  if (emailTo.some((address) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address))) {
-    throw new ConfigError('EMAIL_TO debe contener direcciones de correo separadas por comas.');
+    github = {
+      repository,
+      token,
+      issueNumber: readNumber(env, 'REPORT_ISSUE_NUMBER', null, { integer: true, min: 1 }),
+    };
   }
 
   const thresholds = {
@@ -74,18 +68,11 @@ export function loadConfig(env = process.env) {
     cls: readNumber(env, 'MAX_CLS', 0.1),
     inp: readNumber(env, 'MAX_INP', 200),
   };
-  try {
-    validateGscThresholds(thresholds);
-  } catch (error) {
-    throw new ConfigError(error.message);
-  }
-
   return {
-    properties,
+    origins: [...new Set(origins)],
     devices,
-    storageStateBase64,
-    storageStatePath,
+    apiKey,
     thresholds,
-    email: { apiKey: emailApiKey, apiUrl: emailApiUrl, from: emailFrom, to: emailTo },
+    github,
   };
 }

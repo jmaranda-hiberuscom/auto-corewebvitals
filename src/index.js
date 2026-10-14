@@ -1,79 +1,114 @@
-import { readFile } from 'node:fs/promises';
-import { chromium } from 'playwright';
+import { pathToFileURL } from 'node:url';
 import { ConfigError, loadConfig } from './config.js';
-import { sendEmail } from './email.js';
-import { scrapeGscDeviceReport } from './gsc.js';
+import { getMetricStatus, queryCruxRecord } from './crux.js';
+import { publishGithubReport } from './github.js';
+import { saveReport } from './report.js';
 
 const EXIT_OK = 0;
 const EXIT_ERROR = 2;
 
-async function loadStorageState(config) {
-  try {
-    const serialized = config.storageStateBase64
-      ? Buffer.from(config.storageStateBase64, 'base64').toString('utf8')
-      : await readFile(config.storageStatePath, 'utf8');
-    return JSON.parse(serialized);
-  } catch {
-    throw new ConfigError('No se pudo cargar la sesión de Search Console. Ejecuta npm run auth localmente y configura el estado en GitHub Secrets.');
+function formatDate(date) {
+  return `${String(date.year).padStart(4, '0')}-${String(date.month).padStart(2, '0')}-${String(date.day).padStart(2, '0')}`;
+}
+
+function formatCollectionPeriod(period) {
+  if (!period?.firstDate || !period?.lastDate) return 'No especificado';
+  return `${formatDate(period.firstDate)} a ${formatDate(period.lastDate)}`;
+}
+
+export async function publishReport(config, report, {
+  writeReport = saveReport,
+  publishIssue = publishGithubReport,
+  log = console.log,
+} = {}) {
+  const saved = await writeReport(report);
+  log(`Informe guardado: ${saved.markdownPath}`);
+  if (config.github) {
+    const url = await publishIssue(config.github, saved.markdown);
+    log(`Informe publicado en GitHub: ${url}`);
+    return { ...saved, githubUrl: url };
   }
+  return saved;
+}
+
+export async function runMonitor(config, {
+  queryRecord = queryCruxRecord,
+  publish = publishReport,
+  log = console.log,
+  timestamp = new Date().toISOString(),
+  runUrl = null,
+  demo = false,
+} = {}) {
+  if (demo) {
+    const report = { demo: true, timestamp, runUrl };
+    await publish(config, report);
+    log('Prueba de publicacion terminada; no se ha consultado CrUX.');
+    return report;
+  }
+
+  const measurements = [];
+  const unavailable = [];
+  for (const origin of config.origins) {
+    for (const device of config.devices) {
+      log(`${origin} · ${device}`);
+      const report = await queryRecord(origin, device, config.apiKey);
+      const missingMetrics = report.missingMetrics ?? [];
+      if (!report.available || missingMetrics.length > 0) {
+        unavailable.push({ origin, device, missingMetrics: missingMetrics.length > 0 ? missingMetrics : ['LCP', 'CLS', 'INP'] });
+      }
+      if (!report.available) {
+        log('  -> CrUX no tiene datos suficientes para este origen y dispositivo.');
+        continue;
+      }
+
+      const collectionPeriod = formatCollectionPeriod(report.collectionPeriod);
+      log(`  Periodo CrUX: ${collectionPeriod}`);
+      if (missingMetrics.length > 0) {
+        log(`  -> Sin datos suficientes para: ${missingMetrics.join(', ')}.`);
+      }
+      for (const metric of report.metrics) {
+        const limit = config.thresholds[metric.key];
+        const status = getMetricStatus(metric.key, metric.p75);
+        measurements.push({ origin, device, ...metric, status, limit, collectionPeriod });
+        log(`  -> ${metric.metric}: p75 ${metric.p75}${metric.unit} (${status}; umbral ${limit}${metric.unit})`);
+      }
+    }
+  }
+
+  const report = {
+    timestamp,
+    thresholds: config.thresholds,
+    runUrl,
+    measurements,
+    unavailable,
+  };
+
+  await publish(config, report);
+  log(`Informe diario generado: ${measurements.length} métrica(s), ${unavailable.length} combinación(es) con datos incompletos.`);
+  return report;
 }
 
 async function main() {
-  const config = loadConfig();
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ storageState: await loadStorageState(config) });
-  const alerts = [];
-  try {
-    for (const property of config.properties) {
-      for (const device of config.devices) {
-        console.log(`${property} · ${device}`);
-        const report = await scrapeGscDeviceReport(context, property, device);
-        if (!report.available) {
-          console.log('  -> Sin datos suficientes en Search Console.');
-          continue;
-        }
-
-        if (report.issues.length === 0) {
-          console.log('  -> Sin issues sobre los umbrales estándar.');
-          continue;
-        }
-
-        for (const issue of report.issues) {
-          alerts.push({
-            property,
-            device,
-            ...issue,
-            limit: config.thresholds[issue.key],
-            unit: issue.key === 'cls' ? '' : ' ms',
-          });
-          console.log(`  -> ${issue.metric}: ${issue.status} (${issue.issueText})`);
-        }
-      }
-    }
-  } finally {
-    await context.close();
-    await browser.close();
+  const args = process.argv.slice(2);
+  if (args.some((argument) => argument !== '--demo')) {
+    throw new ConfigError('Solo se admite --demo como opcion; el envio mediante proveedores de correo se ha retirado.');
   }
-
-  if (alerts.length === 0) return EXIT_OK;
-
+  const demo = args.includes('--demo');
+  const config = loadConfig(process.env, { demo });
   const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID } = process.env;
-  const report = {
-    timestamp: new Date().toISOString(),
-    thresholds: config.thresholds,
-    runUrl: GITHUB_RUN_ID ? `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}` : null,
-    alerts,
-  };
-
-  await sendEmail(config, report);
-  console.log(`Email enviado: ${alerts.length} issue(s) sobre el umbral.`);
+  const runUrl = GITHUB_SERVER_URL && GITHUB_REPOSITORY && GITHUB_RUN_ID
+    ? `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`
+    : null;
+  await runMonitor(config, { demo, runUrl });
   return EXIT_OK;
 }
 
-main().then(
-  (code) => process.exit(code),
-  (err) => {
-    console.error(err instanceof ConfigError ? `Configuración inválida: ${err.message}` : err);
-    process.exit(EXIT_ERROR);
-  },
-);
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().then(
+    (code) => process.exit(code),
+    (err) => {
+      console.error(err instanceof ConfigError ? `Configuración inválida: ${err.message}` : err);
+      process.exit(EXIT_ERROR);
+    },
+  );
+}

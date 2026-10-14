@@ -2,7 +2,7 @@
   "name": "cwv-monitor",
   "version": "1.0.0",
   "private": true,
-  "description": "Monitor de Core Web Vitals desde Search Console con alertas por email",
+  "description": "Informes diarios de Core Web Vitals desde CrUX publicados en GitHub",
   "type": "module",
   "engines": {
     "node": ">=22.19"
@@ -10,11 +10,7 @@
   "scripts": {
     "start": "node src/index.js",
     "start:local": "node --env-file=.env src/index.js",
-    "auth": "node src/auth.js",
+    "demo": "node src/index.js --demo",
     "test": "node --test"
-  },
-  "dependencies": {
-    "lighthouse": "^13.5.0",
-    "playwright": "^1.64.0"
   }
 }
