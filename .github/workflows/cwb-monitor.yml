@@ -2,7 +2,7 @@ name: CrUX Core Web Vitals Daily Report
 
 on:
   schedule:
-    - cron: '17 7 * * *'
+    - cron: '30 5 * * *'
   workflow_dispatch:
     inputs:
       mode:
