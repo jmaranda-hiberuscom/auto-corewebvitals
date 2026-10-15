@@ -1,6 +1,6 @@
 # Informe diario de Core Web Vitals
 
-GitHub Actions consulta CrUX cada dia a las 05:30 UTC y publica el informe completo como comentario en una issue del repositorio. Incluye LCP, CLS e INP para movil y escritorio, p75, umbrales y periodo de recopilacion. Se publica aunque todas las metricas esten bien, y distingue expresamente la falta de datos.
+GitHub Actions consulta CrUX cada dia a las 07:30 de Espana peninsular (Europe/Madrid), tanto en verano como en invierno, y publica el informe completo como comentario en una issue del repositorio. Incluye LCP, CLS e INP para movil y escritorio, p75, umbrales y periodo de recopilacion. Se publica aunque todas las metricas esten bien, y distingue expresamente la falta de datos.
 
 No hay proveedor de correo, servidor SMTP, aplicacion adicional ni DNS que configurar. La unica API externa es CrUX, la fuente de los datos. El programa usa Node.js y no instala dependencias de terceros.
 
@@ -43,7 +43,7 @@ Ejecuta **Run workflow > report**. Comprueba que se publica la tabla completa y 
 ## 4. Activar, ajustar o detener
 
 - **Activar diarios:** cambia `MONITOR_ENABLED` a `true`. El modo de las ejecuciones programadas siempre es el informe real. Comprueba la primera ejecucion programada y su notificacion.
-- **Horario:** edita `cron: '30 5 * * *'` en [.github/workflows/cwb-monitor.yml](.github/workflows/cwb-monitor.yml). Son las 05:30 UTC: las 07:30 en Espana peninsular en verano y las 06:30 en invierno. GitHub puede retrasar la ejecucion y no garantiza el minuto exacto.
+- **Horario:** edita `cron: '30 7 * * *'` con `timezone: 'Europe/Madrid'` en [.github/workflows/cwb-monitor.yml](.github/workflows/cwb-monitor.yml). Se programa a las 07:30 de Espana peninsular todo el ano; la zona horaria ajusta automaticamente el cambio de hora (05:30 UTC en verano y 06:30 UTC en invierno). GitHub puede retrasar la ejecucion y no garantiza el minuto exacto.
 - **Web o dispositivos:** actualiza el secret `CRUX_ORIGINS` o la variable `CRUX_DEVICES` (por defecto `MOBILE,DESKTOP`).
 - **Umbrales opcionales:** `MAX_LCP=2500` ms, `MAX_CLS=0.1`, `MAX_INP=200` ms. Marcan excesos, pero no condicionan la publicacion.
 - **Issue opcional:** la variable `REPORT_ISSUE_NUMBER` permite elegir una issue existente por su numero. Si queda vacia, el programa localiza la issue mediante su marcador interno o crea una nueva. No borres el marcador del cuerpo. Una issue cerrada se reabre; cerrarla no pausa la automatizacion.

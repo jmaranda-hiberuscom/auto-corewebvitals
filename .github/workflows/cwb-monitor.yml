@@ -2,7 +2,8 @@ name: CrUX Core Web Vitals Daily Report
 
 on:
   schedule:
-    - cron: '30 5 * * *'
+    - cron: '30 7 * * *'
+      timezone: 'Europe/Madrid'
   workflow_dispatch:
     inputs:
       mode:
